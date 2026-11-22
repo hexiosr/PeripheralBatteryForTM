@@ -32,7 +32,7 @@ TrafficMonitor 插件：在任务栏显示无线键盘、鼠标、手柄的剩�
 
 ## 安装
 
-将 `PeripheralBattery.dll` 放入 TrafficMonitor 的 `plugins` 目录，重启。需要 64 位 TrafficMonitor。
+从 [Releases](https://github.com/hexiosr/PeripheralBatteryForTM/releases/latest) 下载 `PeripheralBattery.dll`，放入 TrafficMonitor 的 `plugins` 目录，重启。需要 64 位 TrafficMonitor。
 
 ## 构建
 
