@@ -2,8 +2,6 @@
 
 TrafficMonitor 插件：在任务栏显示无线键盘、鼠标、手柄的剩余电量。
 
-单 DLL，无外部依赖，不主动唤醒设备。
-
 ![任务栏显示效果](docs/taskbar-real.png)
 
 ## 支持设备
@@ -15,7 +13,7 @@ TrafficMonitor 插件：在任务栏显示无线键盘、鼠标、手柄的剩�
 | 盖世小鸡（GameSir）G7 Pro 手柄 | `\\.\XboxGIP` 总线，只读旁观 | Status 消息，低 2 位为 4 档，bit4 为充电 | 不发查询；90 秒无消息视为断开 |
 | PS5 DualSense 手柄 | USB HID `VID_054C / PID_0CE6`（需 [DS5Dongle](https://github.com/awalol/DS5Dongle) 桥接） | Input Report `0x01` 的 `byte[53]`，低 4 位档位 0~10，高 4 位充电状态 | 每 2 秒枚举在位状态，在位时每 60 秒读一次 |
 
-句柄用完即关，不与官方驱动抢接收器会话；查询失败保留上次读数，不误判离线。G7 Pro 只有 4 档，精确值走未公开的私有协议。
+G7 Pro 只有 4 档，精确值走未公开的私有协议。
 
 ## 显示
 
@@ -26,13 +24,13 @@ TrafficMonitor 插件：在任务栏显示无线键盘、鼠标、手柄的剩�
 
 ## 设置
 
-参数按设备独立保存，底部为全局布局。
+参数按设备独立可自定义。
 
 ![显示设置](docs/display-settings.png)
 
 ## 安装
 
-从 [Releases](https://github.com/hexiosr/PeripheralBatteryForTM/releases/latest) 下载 `PeripheralBattery.dll`，放入 TrafficMonitor 的 `plugins` 目录，重启。需要 64 位 TrafficMonitor。
+从 [Releases](https://github.com/hexiosr/PeripheralBatteryForTM/releases/latest) 下载 `PeripheralBattery.dll`，放入 TrafficMonitor 的 `plugins` 目录，重启。
 
 ## 构建
 
