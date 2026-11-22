@@ -1,0 +1,40 @@
+// Resource script: plugin icon + version info.
+// Keep this file ASCII-only: rc.exe reads a BOM-less .rc as ANSI, so Chinese
+// text here would turn into mojibake inside the DLL. All user-visible strings
+// live in Plugin.cpp as wide literals (compiled with /utf-8).
+//
+// Version numbers come from src/common/Version.h -- the same header Plugin.cpp
+// uses for GetInfo(TMI_VERSION), so the two can never drift apart.
+#include <winver.h>
+#include "Version.h"
+
+// Icon used by GetPluginIcon (loaded from the DLL) and by Explorer.
+1 ICON "app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION PB_VERSION_MAJOR,PB_VERSION_MINOR,PB_VERSION_PATCH,0
+ PRODUCTVERSION PB_VERSION_MAJOR,PB_VERSION_MINOR,PB_VERSION_PATCH,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_DLL
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "FileDescription", "Battery level of wireless peripherals for TrafficMonitor"
+            VALUE "FileVersion", PB_VERSION_STRING
+            VALUE "InternalName", "PeripheralBattery"
+            VALUE "LegalCopyright", "MIT License"
+            VALUE "OriginalFilename", "PeripheralBattery.dll"
+            VALUE "ProductName", "PeripheralBattery"
+            VALUE "ProductVersion", PB_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 0x4b0
+    END
+END

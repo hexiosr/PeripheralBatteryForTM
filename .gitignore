@@ -1,0 +1,18 @@
+# 构建输出
+out/
+out-mingw/
+*.o
+*.obj
+*.res
+*.dll
+*.exe
+
+# 发布包
+*.zip
+
+# 本地工具与配置
+tools/
+.vs/
+.vscode/
+*.user
+*.ini
