@@ -25,9 +25,30 @@ struct DeviceDisplay
 {
     std::wstring name;          // 前缀名（玩家可自定义，故用 wstring 持有）
     int  percent = -1;          // 电量百分比；-1 = 暂无读数 / 未连接
+    int  millivolt = 0;         // 电压（mV）：只报电压的设备用它决定文字颜色
+    std::wstring value_text;    // 非空时替代圆环显示该文本（如 "1.35V"）
     bool charging = false;      // 充电中（环内画 ⚡，不显示数字）
     DeviceStyle style;          // 该设备自己的外观（阈值 / 配色 / 缩放 / 文案）
 };
+
+// ---- 罗技电压设备的显示刻度 ----
+// 罗技的电压采样点在内部防反接二极管之后，比电池标称低约 0.15 V：
+// 新碱性 AA 空载 1.55 V，设备只报 1.35 V。显示时补回来，
+// 补偿后按「满电 1.50 V / 耗尽 1.15 V」线性换算成百分比。
+constexpr int kVoltOffsetMv = 150;
+constexpr int kVoltFullMv = 1500;
+constexpr int kVoltEmptyMv = 1150;
+
+inline int VoltShownMv(int raw) { return raw + kVoltOffsetMv; }
+
+inline int VoltPercentOf(int shown_mv)
+{
+    if (shown_mv >= kVoltFullMv)
+        return 100;
+    if (shown_mv <= kVoltEmptyMv)
+        return 0;
+    return (shown_mv - kVoltEmptyMv) * 100 / (kVoltFullMv - kVoltEmptyMv);
+}
 
 namespace batdraw {
 
@@ -190,6 +211,16 @@ inline COLORREF LevelColor(int percent, bool dark, const DeviceStyle& c)
     return dark ? c.red_dark : c.red_light;
 }
 
+// 电压分档着色：传入补偿后的显示电压，直接套用玩家设置的两档电压分界
+inline COLORREF VoltColor(int mv, bool dark, const DeviceStyle& c)
+{
+    if (mv >= c.volt_high_mv)
+        return dark ? c.green_dark : c.green_light;
+    if (mv >= c.volt_low_mv)
+        return dark ? c.yellow_dark : c.yellow_light;
+    return dark ? c.red_dark : c.red_light;
+}
+
 // 圆环轨道色：比背景略亮的灰，不抢电量弧
 inline COLORREF TrackColor(bool dark)
 {
@@ -229,7 +260,14 @@ inline SegMetrics MeasureSeg(HDC hdc, const DeviceDisplay& d, int avail_h = 0)
             s.value_w = s.ring.dia + c.num_gap + (c.show_pct_sign ? s.num.w : s.num.w_nopct);
     }
     if (s.value_w == 0)
-        s.value_w = d.percent >= 0 ? s.ring.dia : TextW(hdc, c.no_read.c_str()) + 4;
+    {
+        if (d.percent >= 0)
+            s.value_w = s.ring.dia;
+        else if (!d.value_text.empty())
+            s.value_w = TextW(hdc, d.value_text.c_str()) + 4;
+        else
+            s.value_w = TextW(hdc, c.no_read.c_str()) + 4;
+    }
     s.total = s.name_w + s.colon_w + s.gap_colon + s.value_w;
     return s;
 }
@@ -472,7 +510,8 @@ inline void DrawSegments(HDC dc, int x, int y, int h, bool dark,
         }
 
         // 名称: （未连接时与数值一起弱化）
-        SetTextColor(dc, d.percent >= 0 ? text_col : muted_col);
+        const bool has_value = (d.percent >= 0) || !d.value_text.empty();
+        SetTextColor(dc, has_value ? text_col : muted_col);
         {
             RECT rcName{ cx, y, cx + m.name_w + 2, y + h };
             DrawTextW(dc, d.name.c_str(), -1, &rcName, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
@@ -517,6 +556,14 @@ inline void DrawSegments(HDC dc, int x, int y, int h, bool dark,
                     DrawPercent(dc, value_x, y, h, m.ring.dia, m.num, d.percent, dark, s);
                 }
             }
+        }
+        else if (!d.value_text.empty())
+        {
+            // 只有电压的设备（罗技）：不画环，直接显示读数，颜色按电压分档
+            SetTextColor(dc, VoltColor(d.millivolt, dark, s));
+            RECT rcVal{ value_x, y, value_x + m.value_w, y + h };
+            DrawTextW(dc, d.value_text.c_str(), -1, &rcVal,
+                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         }
         else
         {

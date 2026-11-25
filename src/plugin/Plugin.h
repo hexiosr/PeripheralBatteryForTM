@@ -15,11 +15,12 @@
 #include "MouseReader.h"
 #include "DualSenseReader.h"
 #include "G7Reader.h"
+#include "LogitechReader.h"
 #include <string>
 
 // 读取器表在构造函数里按设备索引手工填满：数量变了必须回来补表，
 // 所以这里用断言把它变成编译错误，而不是运行到空指针才崩。
-static_assert(kDeviceCount == 4, "新增设备时同步 Plugin 的 m_readers 与 Plugin.cpp 的 kDeviceMeta");
+static_assert(kDeviceCount == 5, "新增设备时同步 Plugin 的 m_readers 与 Plugin.cpp 的 kDeviceMeta");
 
 class Plugin : public ITMPlugin
 {
@@ -67,9 +68,9 @@ private:
 
     void RefreshDisplay();
     void BuildValueText(const BatterySnapshot& snap, std::wstring& out, const std::wstring& no_read,
-                        bool bars_only);
+                        bool bars_only, bool voltage_only, bool volt_percent);
     void BuildTooltip(const std::wstring& label, const wchar_t* icon, const BatterySnapshot& snap,
-                      std::wstring& out);
+                      bool volt_percent, std::wstring& out);
 
 private:
     static Plugin m_instance;
@@ -79,6 +80,7 @@ private:
     MouseReader m_mouse_reader;
     DualSenseReader m_ds_reader;
     G7Reader m_g7_reader;
+    LogitechReader m_lg_reader;
     IBatteryReader* m_readers[kDeviceCount] = {}; // 设备索引 → 读取器（构造时填满）
     bool m_reader_started[kDeviceCount] = {};     // 各设备 Reader 是否已启动（勾选才查询）
 
@@ -94,8 +96,8 @@ private:
     bool m_placeholder = false;
 
     // UI 线程缓存（由 DataRequired 更新，PeripheralItem::GetItemValueText 读取）
-    std::wstring m_value_text = L"G87: --% | A5 Ultra: --% | G7 Pro: --% | DS5: --%";
-    std::wstring m_sample_text = L"G87: 100%\u26A1 | A5 Ultra: 100%\u26A1 | G7 Pro: \u25AE\u25AE\u25AE\u25AE\u26A1 | DS5: 100%\u26A1";
+    std::wstring m_value_text = L"G87: --% | A5 Ultra: --% | G7 Pro: --% | DS5: --% | M230: --";
+    std::wstring m_sample_text = L"G87: 100%\u26A1 | A5 Ultra: 100%\u26A1 | G7 Pro: \u25AE\u25AE\u25AE\u25AE\u26A1 | DS5: 100%\u26A1 | M230: 1.50V";
     std::wstring m_tooltip;
 };
 

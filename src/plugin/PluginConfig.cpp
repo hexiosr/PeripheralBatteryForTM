@@ -19,6 +19,8 @@ struct StyleIntField
 const StyleIntField kStyleInts[] = {
     { L"level_high",     &DeviceStyle::level_high,     1, 100 },
     { L"level_low",      &DeviceStyle::level_low,      0, 99 },
+    { L"volt_high_mv",   &DeviceStyle::volt_high_mv,   700, 2000 },
+    { L"volt_low_mv",    &DeviceStyle::volt_low_mv,    700, 2000 },
     { L"ring_scale_x10", &DeviceStyle::ring_scale_x10, 8, 40 },
     { L"num_gap",        &DeviceStyle::num_gap,        0, 20 },
 };
@@ -184,6 +186,7 @@ void PluginConfig::Load()
     m_refresh.g7_read_timeout_ms = ReadIntValue(p, L"g7_read_timeout_ms", m_refresh.g7_read_timeout_ms, 100, 60000);
     m_refresh.ds_pnp_ms = ReadIntValue(p, L"ds_pnp_ms", m_refresh.ds_pnp_ms, 1000, 600000);
     m_refresh.ds_read_ms = ReadIntValue(p, L"ds_read_ms", m_refresh.ds_read_ms, 1000, 86400000);
+    m_refresh.lg_poll_ms = ReadIntValue(p, L"lg_poll_ms", m_refresh.lg_poll_ms, 500, 600000);
 
     // 全局布局
     m_layout.sep_w = ReadIntValue(p, L"sep_w", m_layout.sep_w, 0, 60);
@@ -207,6 +210,12 @@ void PluginConfig::Load()
             if (ReadIntIn(p, sect.c_str(), L"show_pct_sign", v) ||
                 ReadIntIn(p, kSection, L"show_pct_sign", v))
                 s.show_pct_sign = v != 0;
+        }
+        {
+            // 只报电压的设备用：0 / 缺省 = 显示电压，1 = 显示百分比
+            int v = 0;
+            if (ReadIntIn(p, sect.c_str(), L"volt_percent", v))
+                s.volt_percent = v != 0;
         }
         for (const StyleColorField& f : kStyleColors)
         {
@@ -257,6 +266,7 @@ void PluginConfig::Save()
     WriteInt(p, kSection, L"g7_read_timeout_ms", m_refresh.g7_read_timeout_ms);
     WriteInt(p, kSection, L"ds_pnp_ms", m_refresh.ds_pnp_ms);
     WriteInt(p, kSection, L"ds_read_ms", m_refresh.ds_read_ms);
+    WriteInt(p, kSection, L"lg_poll_ms", m_refresh.lg_poll_ms);
 
     WriteInt(p, kSection, L"sep_w", m_layout.sep_w);
     WriteInt(p, kSection, L"pad_lr", m_layout.pad_lr);
@@ -270,6 +280,7 @@ void PluginConfig::Save()
         for (const StyleIntField& f : kStyleInts)
             WriteInt(p, sect.c_str(), f.key, s.*f.member);
         WriteInt(p, sect.c_str(), L"show_pct_sign", s.show_pct_sign ? 1 : 0);
+        WriteInt(p, sect.c_str(), L"volt_percent", s.volt_percent ? 1 : 0);
         for (const StyleColorField& f : kStyleColors)
             WriteColor(p, sect.c_str(), f.key, s.*f.member);
         WritePrivateProfileStringW(sect.c_str(), L"no_read", s.no_read.c_str(), p.c_str());
@@ -357,6 +368,7 @@ void PluginConfig::SanitizeLocked()
     m_refresh.g7_read_timeout_ms = Clamp(m_refresh.g7_read_timeout_ms, 100, 60000);
     m_refresh.ds_pnp_ms = Clamp(m_refresh.ds_pnp_ms, 1000, 600000);
     m_refresh.ds_read_ms = Clamp(m_refresh.ds_read_ms, 1000, 86400000);
+    m_refresh.lg_poll_ms = Clamp(m_refresh.lg_poll_ms, 500, 600000);
 
     m_layout.sep_w = Clamp(m_layout.sep_w, 0, 60);
     m_layout.pad_lr = Clamp(m_layout.pad_lr, 0, 20);
@@ -370,6 +382,13 @@ void PluginConfig::SanitizeLocked()
         {
             s.level_high = 60;
             s.level_low = 20;
+        }
+        s.volt_high_mv = Clamp(s.volt_high_mv, 700, 2000);
+        s.volt_low_mv = Clamp(s.volt_low_mv, 700, 2000);
+        if (s.volt_low_mv >= s.volt_high_mv) // 同上，电压刻度
+        {
+            s.volt_high_mv = 1450;
+            s.volt_low_mv = 1250;
         }
         s.ring_scale_x10 = Clamp(s.ring_scale_x10, 8, 40);
         s.num_gap = Clamp(s.num_gap, 0, 20);

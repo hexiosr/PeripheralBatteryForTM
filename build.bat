@@ -73,7 +73,7 @@ echo.
 echo == [1/3] Build plugin DLL ==
 cl /nologo /c /EHsc /utf-8 /DUNICODE /D_UNICODE /O2 /MD /W3 ^
     /I"%ROOT%src\common" /I"%ROOT%src\keyboard" /I"%ROOT%src\mouse" ^
-    /I"%ROOT%src\dualsense" /I"%ROOT%src\g7" /I"%ROOT%src\plugin" ^
+    /I"%ROOT%src\dualsense" /I"%ROOT%src\g7" /I"%ROOT%src\logitech" /I"%ROOT%src\plugin" ^
     "%ROOT%src\keyboard\KeyboardDevice.cpp" ^
     "%ROOT%src\keyboard\KeyboardReader.cpp" ^
     "%ROOT%src\mouse\MouseDevice.cpp" ^
@@ -82,6 +82,8 @@ cl /nologo /c /EHsc /utf-8 /DUNICODE /D_UNICODE /O2 /MD /W3 ^
     "%ROOT%src\dualsense\DualSenseReader.cpp" ^
     "%ROOT%src\g7\G7Device.cpp" ^
     "%ROOT%src\g7\G7Reader.cpp" ^
+    "%ROOT%src\logitech\LogitechDevice.cpp" ^
+    "%ROOT%src\logitech\LogitechReader.cpp" ^
     "%ROOT%src\plugin\PluginConfig.cpp" ^
     "%ROOT%src\plugin\PeripheralItem.cpp" ^
     "%ROOT%src\plugin\Plugin.cpp" ^
@@ -98,7 +100,7 @@ link /nologo /DLL /OUT:PeripheralBattery.dll /SUBSYSTEM:WINDOWS ^
     KeyboardDevice.obj KeyboardReader.obj ^
     MouseDevice.obj MouseReader.obj ^
     DualSenseDevice.obj DualSenseReader.obj ^
-    G7Device.obj G7Reader.obj ^
+    G7Device.obj G7Reader.obj LogitechDevice.obj LogitechReader.obj ^
     PluginConfig.obj ^
     PeripheralItem.obj Plugin.obj dllmain.obj Plugin.res ^
     kernel32.lib user32.lib gdi32.lib gdiplus.lib setupapi.lib hid.lib ucrt.lib uuid.lib comdlg32.lib

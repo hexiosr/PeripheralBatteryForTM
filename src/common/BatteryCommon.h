@@ -6,11 +6,12 @@
 #include <atomic>
 #include <string>
 
-// 单次电量读数（键盘 0x13 协议与鼠标 0x11 feature 协议共用）
+// 单次电量读数（键鼠 0x13 / 0x11 协议、罗技 HID++ 电压共用）
 struct BatteryReading
 {
     bool   valid = false;    // 是否有有效读数
     int    percent = -1;     // 电量百分比 0~100
+    int    millivolt = 0;    // 电压（mV）；只报电压的设备用它代替百分比
     bool   charging = false; // 是否充电中
 };
 
@@ -21,6 +22,7 @@ struct BatterySnapshot
     bool   online = false;       // 最近查询是否成功
     bool   valid = false;        // 是否有有效读数
     int    percent = -1;         // 电量百分比
+    int    millivolt = 0;        // 电压（mV）
     bool   charging = false;     // 充电中
     ULONGLONG last_update_ms = 0;// 最近一次成功读数时间（GetTickCount64）
 };

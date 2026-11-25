@@ -76,6 +76,7 @@ protected:
         {
             m_snapshot.valid = true;
             m_snapshot.percent = reading.percent;
+            m_snapshot.millivolt = reading.millivolt;
             m_snapshot.charging = reading.charging;
             m_snapshot.last_update_ms = now_ms;
         }

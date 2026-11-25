@@ -27,17 +27,23 @@ struct DeviceMeta
 {
     const wchar_t* tip_icon;
     bool bars_only;
+    bool voltage_only; // 只报电压（罗技）：任务栏显示 1.35V，不画圆环
 };
 
 const DeviceMeta kDeviceMeta[] = {
-    { kTipIconKb,  false }, // 0 G87
-    { kTipIconMs,  false }, // 1 A5 Ultra
-    { kTipIconPad, true  }, // 2 G7 Pro
-    { kTipIconPad, false }, // 3 DS5
+    { kTipIconKb,  false, false }, // 0 G87
+    { kTipIconMs,  false, false }, // 1 A5 Ultra
+    { kTipIconPad, true,  false }, // 2 G7 Pro
+    { kTipIconPad, false, false }, // 3 DS5
+    { kTipIconMs,  false, true  }, // 4 M230（罗技，只报电压）
 };
 
 static_assert(sizeof(kDeviceMeta) / sizeof(kDeviceMeta[0]) == kDeviceCount,
               "kDeviceMeta 的项数与 kDeviceCount 不一致");
+
+// 罗技 M230 的电压刻度（补偿 0.15 V、换算百分比）定义在 BatteryDraw.h，
+// 这里与绘制层共用同一套，不会出现颜色和数字对不上
+
 
 // 全部取消勾选：条目不能真的消失，否则任务栏上没有点击区域，右键进不来设置
 static const wchar_t* const kPlaceholderText = L"外设电量";
@@ -53,6 +59,7 @@ Plugin::Plugin()
     m_readers[1] = &m_mouse_reader; // A5 Ultra
     m_readers[2] = &m_g7_reader;    // G7 Pro
     m_readers[3] = &m_ds_reader;    // DS5
+    m_readers[4] = &m_lg_reader;    // M230
 
     // 预填显示数组：首次 DataRequired 之前，自绘也能按完整布局计算宽度
     for (int i = 0; i < kDeviceCount; ++i)
@@ -115,12 +122,13 @@ void Plugin::RefreshDisplay()
         const bool live = s.has_device && s.online && s.valid;
 
         std::wstring txt;
-        BuildValueText(s, txt, styles[dev].no_read, kDeviceMeta[dev].bars_only);
+        BuildValueText(s, txt, styles[dev].no_read, kDeviceMeta[dev].bars_only,
+                       kDeviceMeta[dev].voltage_only, styles[dev].volt_percent);
         if (!val.empty())
             val += L" | ";
         val += tc.name[dev] + L": " + txt;
 
-        BuildTooltip(tc.name[dev], kDeviceMeta[dev].tip_icon, s, tip);
+        BuildTooltip(tc.name[dev], kDeviceMeta[dev].tip_icon, s, styles[dev].volt_percent, tip);
         tip += L'\n';
 
         // 自绘数据：未连接 / 暂无读数 → 空圆环 + --（手柄与键鼠一致）
@@ -130,8 +138,29 @@ void Plugin::RefreshDisplay()
         d.style = styles[dev];
         if (live)
         {
-            d.percent = s.percent;
-            d.charging = s.charging;
+            if (kDeviceMeta[dev].voltage_only && styles[dev].volt_percent)
+            {
+                // 选了「显示百分比」：和其余设备一样画环 + 数字
+                if (s.millivolt > 0)
+                    d.percent = VoltPercentOf(VoltShownMv(s.millivolt));
+            }
+            else if (kDeviceMeta[dev].voltage_only)
+            {
+                // 只有电压：不画环，直接显示读数（颜色由绘制层按电压分档）
+                if (s.millivolt > 0)
+                {
+                    const int mv = VoltShownMv(s.millivolt);
+                    wchar_t buf[32];
+                    swprintf_s(buf, L"%d.%02dV", mv / 1000, (mv % 1000) / 10);
+                    d.value_text = buf;
+                    d.millivolt = mv;
+                }
+            }
+            else
+            {
+                d.percent = s.percent;
+                d.charging = s.charging;
+            }
         }
     }
     m_value_text = val;
@@ -149,7 +178,10 @@ void Plugin::RefreshDisplay()
         if (!m_sample_text.empty())
             m_sample_text += L" | ";
         m_sample_text += tc.name[dev] + L": ";
-        m_sample_text += kDeviceMeta[dev].bars_only ? L"\u25AE\u25AE\u25AE\u25AE\u26A1" : L"100%\u26A1";
+        if (kDeviceMeta[dev].voltage_only)
+            m_sample_text += styles[dev].volt_percent ? L"100%" : L"1.50V";
+        else
+            m_sample_text += kDeviceMeta[dev].bars_only ? L"\u25AE\u25AE\u25AE\u25AE\u26A1" : L"100%\u26A1";
     }
 
     // 全部取消勾选：保留占位项，任务栏上仍有点击区域可右键打开设置
@@ -164,11 +196,36 @@ void Plugin::RefreshDisplay()
 // 任务栏数值：普通设备显示百分比；只有粗档的设备（G7 Pro）用电池图标
 //  ▮▮▮▮ = 满   ▮▮▮▯ = 高   ▮▮▯▯ = 中   ▮▯▯▯ = 低   ⚡ 后缀 = 充电中
 void Plugin::BuildValueText(const BatterySnapshot& snap, std::wstring& out, const std::wstring& no_read,
-                            bool bars_only)
+                            bool bars_only, bool voltage_only, bool volt_percent)
 {
-    if (!snap.has_device || !snap.online || !snap.valid || snap.percent < 0)
+    if (!snap.has_device || !snap.online || !snap.valid)
     {
         out = no_read; // 未找到设备 / 离线 / 暂无有效读数
+        return;
+    }
+
+    // 只报电压的设备：默认显示补偿后的电压（见 kLgVoltOffsetMv），
+    // 也可以在设置里改成显示百分比（设备真实电压刻度 → 0~100）
+    if (voltage_only)
+    {
+        if (snap.millivolt <= 0)
+        {
+            out = no_read;
+            return;
+        }
+        const int mv = VoltShownMv(snap.millivolt);
+        wchar_t buf[32];
+        if (volt_percent)
+            swprintf_s(buf, L"%d%%", VoltPercentOf(mv));
+        else
+            swprintf_s(buf, L"%d.%02dV", mv / 1000, (mv % 1000) / 10);
+        out = buf;
+        return;
+    }
+
+    if (snap.percent < 0)
+    {
+        out = no_read;
         return;
     }
 
@@ -217,7 +274,7 @@ static void AppendUpdatedAgo(const BatterySnapshot& snap, std::wstring& out)
 // 悬停提示为一行式：图标 型号：状态 · 更新时间
 // 四类设备的提示格式一致，只有图标不同，图标由 kDeviceMeta 传入
 void Plugin::BuildTooltip(const std::wstring& label, const wchar_t* icon, const BatterySnapshot& snap,
-                          std::wstring& out)
+                          bool volt_percent, std::wstring& out)
 {
     out += icon;
     out += label;
@@ -230,7 +287,16 @@ void Plugin::BuildTooltip(const std::wstring& label, const wchar_t* icon, const 
     }
 
     wchar_t buf[32];
-    if (snap.charging)
+    if (snap.percent < 0 && snap.millivolt > 0)
+    {
+        const int mv = VoltShownMv(snap.millivolt);
+        // 百分比模式下把电压一并给出，方便对照电池标签
+        if (volt_percent)
+            swprintf_s(buf, L"：%d%%（%d.%02d V）", VoltPercentOf(mv), mv / 1000, (mv % 1000) / 10);
+        else
+            swprintf_s(buf, L"：%d.%02d V", mv / 1000, (mv % 1000) / 10);
+    }
+    else if (snap.charging)
         swprintf_s(buf, L"：%d%% \u26A1充电中", snap.percent); // ⚡
     else
         swprintf_s(buf, L"：%d%%", snap.percent);
@@ -509,16 +575,21 @@ constexpr UINT IDC_LBL_NUM0 = 720;      // 720..723：外观数值标签
 constexpr UINT IDC_LBL_COLORROW0 = 724; // 724..726：高 / 中 / 低电量
 constexpr UINT IDC_LBL_COLORHEAD0 = 727;// 727..728：深色 / 浅色任务栏
 constexpr UINT IDC_LBL_NOREAD = 729;    // 「无数据时显示」
-constexpr UINT IDC_LBL_REF0 = 730;      // 730..744：刷新策略标签（按 kRefFields 索引）
-constexpr UINT IDC_LBL_CAP_COLOR = 745; // 「电量配色」小标题
-constexpr UINT IDC_LBL_GLOBAL = 746;    // 「全局布局」分组标签
-constexpr UINT IDC_REF0 = 800;     // 800..814：刷新策略（秒，按 kRefFields 索引）
-constexpr UINT IDC_NUM0 = 820;     // 820..835：外观数值 dev*4 + i
-constexpr UINT IDC_NOREAD0 = 836;  // 836..839：无数据时显示的文本（按设备）
-constexpr UINT IDC_SHOW_SEP = 840; // 显示设备分隔线（全局）
-constexpr UINT IDC_SHOWPCT0 = 841; // 841..844：显示百分号（按设备）
-constexpr UINT IDC_LAY0 = 845;     // 845：设备间距 / 846：左右边距（全局）
-constexpr UINT IDC_COLOR0 = 860;   // 860..883：外观配色 dev*6 + slot（RRGGBB）
+constexpr UINT IDC_LBL_NUMV0 = 748;     // 748..749：电压设备的高 / 中电量电压标签（与 NUM0/1 同位置互斥）
+// ID 一律按 kDeviceCount / kRefFieldsCount 留足区间：
+// 加设备或加刷新项时，越界会撞上下一段，症状是某个标签被顶掉
+constexpr int kRefFieldsCount = 16;
+constexpr UINT IDC_LBL_REF0 = 730;      // 730..745：刷新策略标签（16 项）
+constexpr UINT IDC_LBL_CAP_COLOR = 746; // 「电量配色」小标题
+constexpr UINT IDC_LBL_GLOBAL = 747;    // 「全局布局」分组标签
+constexpr UINT IDC_REF0 = 800;          // 800..815：刷新策略（16 项，秒）
+constexpr UINT IDC_NUM0 = 820;          // 820..839：外观数值 dev*4 + i
+constexpr UINT IDC_NOREAD0 = 840;       // 840..844：无数据时显示的文本（按设备）
+constexpr UINT IDC_SHOW_SEP = 845;      // 显示设备分隔线（全局）
+constexpr UINT IDC_SHOWPCT0 = 846;      // 846..850：显示百分号（按设备）
+constexpr UINT IDC_SHOWVOLTPCT0 = 853;  // 853..857：只报电压的设备「显示百分比」（按设备，与上面同位置互斥）
+constexpr UINT IDC_LAY0 = 851;          // 851：设备间距 / 852：左右边距（全局）
+constexpr UINT IDC_COLOR0 = 860;        // 860..889：外观配色 dev*6 + slot（RRGGBB）
 
 constexpr COLORREF kDlgBg = RGB(247, 247, 248);
 
@@ -595,7 +666,7 @@ struct RefField
 };
 
 // 刷新策略：每个设备一张卡片，卡片标题用玩家自定义的设备名，其中每行一项
-const RefField kRefFields[15] = {
+const RefField kRefFields[kRefFieldsCount] = {
     { L"休眠判定", 1, 86400, &RefreshConfig::kb_wake_ms, 0,
       L"闲置满这么多秒后的第一次按键算唤醒，并立刻查询一次电量；连续打字时不会误触发。默认 60 秒。" },
     { L"使用判定", 1, 86400, &RefreshConfig::kb_active_ms, 0,
@@ -626,6 +697,8 @@ const RefField kRefFields[15] = {
       L"每隔这么多秒检查手柄是否还在系统中，不在则显示 --。默认 2 秒。" },
     { L"读取间隔", 1, 86400, &RefreshConfig::ds_read_ms, 3,
       L"手柄在位时每隔这么多秒读一次电量；刚接入会立刻读一次。默认 60 秒。" },
+    { L"查询间隔", 1, 600, &RefreshConfig::lg_poll_ms, 4,
+      L"每隔这么多秒向接收器查一次电压。鼠标休眠时接收器不回包，这属于正常，会保留上次读数，鼠标一动就能刷新。默认 2 秒。" },
 };
 
 // 外观数值（每台设备各一份）
@@ -684,6 +757,14 @@ const wchar_t* const kNoReadLabel = L"无数据时显示";
 const wchar_t* const kColorCaption = L"电量配色";
 const wchar_t* const kShowSepLabel = L"显示设备分隔线";
 const wchar_t* const kShowPctLabel = L"显示百分号";
+const wchar_t* const kShowVoltPctLabel = L"显示电量环";
+
+// 只报电压的设备显示电压时，两组数值分界换成电压（毫伏），与 % 那套互斥
+const wchar_t* const kNumVoltLabels[2] = { L"高电量电压 mV", L"中电量电压 mV" };
+const wchar_t* const kNumVoltTips[2] = {
+    L"显示电压大于等于该值时使用高电量颜色。填补偿后的毫伏，新碱性电池约 1500。",
+    L"显示电压大于等于该值（且低于高电量电压）时使用中电量颜色，再低为低电量颜色。",
+};
 const wchar_t* const kAppCaption = L"外观";  // 卡片内的分段标题
 constexpr size_t kNoReadMax = 15;
 constexpr size_t kDevNameMax = 31;
@@ -750,6 +831,9 @@ void ComputeLayoutPass(HWND hDlg, HFONT font, bool compact)
     // ---- 右卡片：页签内各块的横向度量 ----
     for (int i = 0; i < kNumFieldsCount; ++i)
         L.num_lbl_w[i % 2] = Max2(L.num_lbl_w[i % 2], MeasureText(hdc, font, kNumFields[i].label, nullptr));
+    // 电压设备的两档分界换成「高/中电量电压 mV」，同位置互斥，取两者较宽
+    for (int i = 0; i < 2; ++i)
+        L.num_lbl_w[i] = Max2(L.num_lbl_w[i], MeasureText(hdc, font, kNumVoltLabels[i], nullptr));
     L.num_lbl_w[0] += S(8);
     L.num_lbl_w[1] += S(8);
     L.num_edit_w = Max2(MeasureText(hdc, font, L"100", nullptr) + S(20), S(52));
@@ -764,14 +848,16 @@ void ComputeLayoutPass(HWND hDlg, HFONT font, bool compact)
     const int color_w = L.color_lbl_w + lbl_gap + 3 * chip_min + 2 * chip_gap;
 
     int ref_lbl = 0;
-    for (int i = 0; i < 15; ++i)
+    for (int i = 0; i < kRefFieldsCount; ++i)
         ref_lbl = Max2(ref_lbl, MeasureText(hdc, font, kRefFields[i].label, nullptr));
     L.ref_lbl_w = ref_lbl + S(8);
     L.ref_edit_w = edit_min;
     L.ref_col_gap = col_gap;
     const int ref_w = 2 * (L.ref_lbl_w + lbl_gap + L.ref_edit_w) + L.ref_col_gap;
 
-    L.pct_w = MeasureText(hdc, font, kShowPctLabel, nullptr) + S(28);
+    // 「显示百分号」与「显示百分比」同位置互斥，宽度取两者较宽者
+    L.pct_w = Max2(MeasureText(hdc, font, kShowPctLabel, nullptr),
+                   MeasureText(hdc, font, kShowVoltPctLabel, nullptr)) + S(28);
     L.noread_lbl_w = MeasureText(hdc, font, kNoReadLabel, nullptr) + S(8);
     L.noread_edit_w = Max2(MeasureText(hdc, font, L"--", nullptr) + S(20), S(56));
     const int bottom_w = L.pct_w + S(18) + L.noread_lbl_w + lbl_gap + L.noread_edit_w;
@@ -817,7 +903,7 @@ void ComputeLayoutPass(HWND hDlg, HFONT font, bool compact)
     for (int d = 0; d < kDeviceCount; ++d)
     {
         int n = 0;
-        for (int i = 0; i < 15; ++i)
+        for (int i = 0; i < kRefFieldsCount; ++i)
             if (kRefFields[i].dev == d)
                 ++n;
         max_rows = Max2(max_rows, (n + 1) / 2);
@@ -1090,7 +1176,7 @@ COLORREF ChipTextColor(COLORREF c)
 void FillAdvancedFields(HWND hDlg, const RefreshConfig& r, const LayoutConfig& lay,
                         const DeviceStyle* styles, const TextConfig& t)
 {
-    for (int i = 0; i < 15; ++i)
+    for (int i = 0; i < kRefFieldsCount; ++i)
         SetIntText(GetDlgItem(hDlg, IDC_REF0 + i), SecFromMs(r.*kRefFields[i].member));
 
     for (int i = 0; i < kLayoutFieldsCount; ++i)
@@ -1100,9 +1186,17 @@ void FillAdvancedFields(HWND hDlg, const RefreshConfig& r, const LayoutConfig& l
     for (int dev = 0; dev < kDeviceCount; ++dev)
     {
         const DeviceStyle& s = styles[dev];
+        // 电压设备显示电压时，前两格填电压分界（mV）；显示电量环时就是普通百分比分界
+        const bool volt_mode = kDeviceMeta[dev].voltage_only && !s.volt_percent;
         for (int i = 0; i < kNumFieldsCount; ++i)
-            SetIntText(GetDlgItem(hDlg, IDC_NUM0 + dev * kNumFieldsCount + i), s.*kNumFields[i].member);
+        {
+            int v = s.*kNumFields[i].member;
+            if (volt_mode && i < 2)
+                v = (i == 0) ? s.volt_high_mv : s.volt_low_mv;
+            SetIntText(GetDlgItem(hDlg, IDC_NUM0 + dev * kNumFieldsCount + i), v);
+        }
         CheckDlgButton(hDlg, IDC_SHOWPCT0 + dev, s.show_pct_sign ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(hDlg, IDC_SHOWVOLTPCT0 + dev, s.volt_percent ? BST_CHECKED : BST_UNCHECKED);
         for (int i = 0; i < kColorCount; ++i)
         {
             const int idx = dev * kColorCount + i;
@@ -1153,8 +1247,14 @@ void SyncDetailVisible(HWND hDlg)
     };
 
     // 外观页签：标签只有一份，随页签整体显隐
+    // 电压设备在「显示电压」模式下，前两格标签换成「高/中电量电压 mV」
+    const bool volt_labels = g_cur_dev >= 0 && g_cur_dev < kDeviceCount &&
+                             kDeviceMeta[g_cur_dev].voltage_only &&
+                             IsDlgButtonChecked(hDlg, IDC_SHOWVOLTPCT0 + g_cur_dev) != BST_CHECKED;
     for (int i = 0; i < kNumFieldsCount; ++i)
-        show(IDC_LBL_NUM0 + i, app);
+        show(IDC_LBL_NUM0 + i, app && !(volt_labels && i < 2));
+    for (int i = 0; i < 2; ++i)
+        show(IDC_LBL_NUMV0 + i, app && volt_labels);
     for (int i = 0; i < kColorRowsCount; ++i)
         show(IDC_LBL_COLORROW0 + i, app);
     for (int i = 0; i < 2; ++i)
@@ -1163,7 +1263,7 @@ void SyncDetailVisible(HWND hDlg)
     show(IDC_LBL_NOREAD, app);
 
     // 刷新页签：标签按 kRefFields 索引，只显示当前设备那几项
-    for (int i = 0; i < 15; ++i)
+    for (int i = 0; i < kRefFieldsCount; ++i)
         show(IDC_LBL_REF0 + i, !app && kRefFields[i].dev == g_cur_dev);
 
 
@@ -1177,8 +1277,10 @@ void SyncDetailVisible(HWND hDlg)
         for (int i = 0; i < kColorCount; ++i)
             show(IDC_COLOR0 + dev * kColorCount + i, on_app);
         show(IDC_NOREAD0 + dev, on_app);
-        show(IDC_SHOWPCT0 + dev, on_app);
-        for (int i = 0; i < 15; ++i)
+        // 两个开关占同一格：电压设备显示「显示百分比」，其余显示「显示百分号」
+        show(IDC_SHOWPCT0 + dev, on_app && !kDeviceMeta[dev].voltage_only);
+        show(IDC_SHOWVOLTPCT0 + dev, on_app && kDeviceMeta[dev].voltage_only);
+        for (int i = 0; i < kRefFieldsCount; ++i)
             if (kRefFields[i].dev == dev)
                 show(IDC_REF0 + i, on_ref);
     }
@@ -1186,6 +1288,23 @@ void SyncDetailVisible(HWND hDlg)
     // 页签按钮重绘选中态
     InvalidateRect(GetDlgItem(hDlg, IDC_TAB_APP), nullptr, TRUE);
     InvalidateRect(GetDlgItem(hDlg, IDC_TAB_REF), nullptr, TRUE);
+}
+
+// 只取值、不校验也不报错（切换显示模式时换算用，非法输入直接跳过）
+bool ParseEditInt(HWND edit, int& out)
+{
+    if (!edit)
+        return false;
+    wchar_t buf[32]{};
+    GetWindowTextW(edit, buf, 32);
+    wchar_t* end = nullptr;
+    long v = wcstol(buf, &end, 10);
+    while (*end == L' ' || *end == L'\t')
+        ++end;
+    if (end == buf || *end != L'\0')
+        return false;
+    out = static_cast<int>(v);
+    return true;
 }
 
 bool ReadIntField(HWND hDlg, HWND edit, const wchar_t* label, int lo, int hi,
@@ -1246,8 +1365,8 @@ bool ReadColorField(HWND, int dev, int slot, COLORREF& out)
 bool ReadAdvancedFields(HWND hDlg)
 {
     RefreshConfig r;
-    int sec[15]{};
-    for (int i = 0; i < 15; ++i)
+    int sec[kRefFieldsCount]{};
+    for (int i = 0; i < kRefFieldsCount; ++i)
     {
         const std::wstring label =
             PluginConfig::Instance().Name(kRefFields[i].dev) + L" " + kRefFields[i].label;
@@ -1255,7 +1374,7 @@ bool ReadAdvancedFields(HWND hDlg)
                           kRefFields[i].lo, kRefFields[i].hi, L"（秒）", sec[i]))
             return false;
     }
-    for (int i = 0; i < 15; ++i)
+    for (int i = 0; i < kRefFieldsCount; ++i)
         r.*kRefFields[i].member = sec[i] * 1000;
 
     // 全局布局
@@ -1266,27 +1385,61 @@ bool ReadAdvancedFields(HWND hDlg)
             return false;
     lay.show_sep = IsDlgButtonChecked(hDlg, IDC_SHOW_SEP) == BST_CHECKED;
 
-    // 每台设备各一份外观
+    // 每台设备各一份外观：从当前配置起拷贝，
+    // 这样当前模式没在界面上暴露的字段（如电压设备的百分比分界）不会被重置成默认值
     DeviceStyle styles[kDeviceCount];
+    for (int dev = 0; dev < kDeviceCount; ++dev)
+        styles[dev] = PluginConfig::Instance().Style(dev);
     for (int dev = 0; dev < kDeviceCount; ++dev)
     {
         const std::wstring prefix = PluginConfig::Instance().Name(dev) + L" ";
         DeviceStyle& s = styles[dev];
+        const bool is_volt = kDeviceMeta[dev].voltage_only;
+
+        // 先定下显示模式，它决定前两格填的是百分比还是毫伏
+        if (is_volt)
+            s.volt_percent = IsDlgButtonChecked(hDlg, IDC_SHOWVOLTPCT0 + dev) == BST_CHECKED;
+        else
+            s.show_pct_sign = IsDlgButtonChecked(hDlg, IDC_SHOWPCT0 + dev) == BST_CHECKED;
+
+        const bool volt_mode = is_volt && !s.volt_percent;
         for (int i = 0; i < kNumFieldsCount; ++i)
         {
-            const std::wstring label = prefix + kNumFields[i].label;
+            const bool as_mv = volt_mode && i < 2;
+            const std::wstring label = prefix + (as_mv ? kNumVoltLabels[i] : kNumFields[i].label);
+            const int lo = as_mv ? 700 : kNumFields[i].lo;
+            const int hi = as_mv ? 2000 : kNumFields[i].hi;
+            int v = 0;
             if (!ReadIntField(hDlg, GetDlgItem(hDlg, IDC_NUM0 + dev * kNumFieldsCount + i),
-                              label.c_str(), kNumFields[i].lo, kNumFields[i].hi, L" ",
-                              s.*kNumFields[i].member))
+                              label.c_str(), lo, hi, L" ", v))
                 return false;
+            if (as_mv)
+            {
+                if (i == 0)
+                    s.volt_high_mv = v;
+                else
+                    s.volt_low_mv = v;
+            }
+            else
+            {
+                s.*kNumFields[i].member = v;
+            }
         }
-        if (s.level_low >= s.level_high)
+        if (volt_mode)
+        {
+            if (s.volt_low_mv >= s.volt_high_mv)
+            {
+                WarnField(hDlg, GetDlgItem(hDlg, IDC_NUM0 + dev * kNumFieldsCount + 1),
+                          std::wstring(L"“") + prefix + L"”的「中电量电压」必须小于「高电量电压」。");
+                return false;
+            }
+        }
+        else if (s.level_low >= s.level_high)
         {
             WarnField(hDlg, GetDlgItem(hDlg, IDC_NUM0 + dev * kNumFieldsCount + 1),
                       std::wstring(L"“") + prefix + L"”的「中电量分界 %」必须小于「高电量分界 %」。");
             return false;
         }
-        s.show_pct_sign = IsDlgButtonChecked(hDlg, IDC_SHOWPCT0 + dev) == BST_CHECKED;
         for (int i = 0; i < kColorCount; ++i)
             if (!ReadColorField(hDlg, dev, i, s.*kColorMembers[i]))
                 return false;
@@ -1678,6 +1831,32 @@ LRESULT CALLBACK OptionDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 PickChipColor(hwnd, (int)id - (int)IDC_COLOR0);
                 return TRUE;
             }
+            // 「显示电量环」勾选变化：前两格在百分比 / 毫伏之间换算，标签跟着换，
+            // 免得切一次模式就把已经调好的分界点重置成默认值
+            if (HIWORD(wp) == BN_CLICKED && id >= IDC_SHOWVOLTPCT0 &&
+                id < IDC_SHOWVOLTPCT0 + (UINT)kDeviceCount)
+            {
+                const int dev = (int)id - (int)IDC_SHOWVOLTPCT0;
+                if (dev == g_cur_dev)
+                {
+                    const bool pct_mode = IsDlgButtonChecked(hwnd, id) == BST_CHECKED;
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        HWND ed = GetDlgItem(hwnd, IDC_NUM0 + dev * kNumFieldsCount + i);
+                        int v = 0;
+                        if (!ParseEditInt(ed, v))
+                            continue;
+                        // 百分比最大 100、毫伏最小 700，按数值大小区分当前语义
+                        if (pct_mode && v > 200)
+                            v = VoltPercentOf(v);
+                        else if (!pct_mode && v <= 200)
+                            v = kVoltEmptyMv + v * (kVoltFullMv - kVoltEmptyMv) / 100;
+                        SetIntText(ed, v);
+                    }
+                    SyncDetailVisible(hwnd);
+                }
+                return TRUE;
+            }
             // 回车 / Esc 在改名输入框里先结束改名，不触发确定 / 关窗
             if (id == IDOK && g_name_edit)
             {
@@ -2046,6 +2225,12 @@ ITMPlugin::OptionReturn Plugin::ShowOptionsDialog(void* hParent)
         const int y = L.body_y + row * L.field_step;
         HWND lbl = mkStatic(IDC_LBL_NUM0 + i, kNumFields[i].label, lx, y, L.num_lbl_w[col]);
         addTip(lbl, kNumFields[i].tip);
+        if (i < 2)
+        {
+            // 电压设备显示电压时用这组标签，与上面同位置互斥
+            HWND vl = mkStatic(IDC_LBL_NUMV0 + i, kNumVoltLabels[i], lx, y, L.num_lbl_w[col]);
+            addTip(vl, kNumVoltTips[i]);
+        }
         for (int dev = 0; dev < kDeviceCount; ++dev)
             addTip(mkEdit(IDC_NUM0 + dev * kNumFieldsCount + i,
                           lx + L.num_lbl_w[col] + S(6), y, L.num_edit_w),
@@ -2077,10 +2262,16 @@ ITMPlugin::OptionReturn Plugin::ShowOptionsDialog(void* hParent)
         }
     }
 
-    // ---------- 外观页签底部：显示百分号 + 无数据文案 ----------
+    // ---------- 外观页签底部：显示百分号 / 显示百分比 + 无数据文案 ----------
+    // 两个开关占同一格：只报电压的设备（M230）用「显示百分比」，其余设备用「显示百分号」
     for (int dev = 0; dev < kDeviceCount; ++dev)
+    {
         addTip(mkCheck(IDC_SHOWPCT0 + dev, kShowPctLabel, cx, L.pct_y, L.pct_w),
                L"任务栏双行显示时生效，默认开启。只影响这一台设备。");
+        HWND vp = mkCheck(IDC_SHOWVOLTPCT0 + dev, kShowVoltPctLabel, cx, L.pct_y, L.pct_w);
+        if (kDeviceMeta[dev].voltage_only)
+            addTip(vp, L"关闭时显示电压，开启时按电压换算成百分比（满电 100%）。只影响这一台设备。");
+    }
     {
         const int nx = cx + L.pct_w + S(18);
         mkStatic(IDC_LBL_NOREAD, kNoReadLabel, nx, L.pct_y, L.noread_lbl_w);
@@ -2094,7 +2285,7 @@ ITMPlugin::OptionReturn Plugin::ShowOptionsDialog(void* hParent)
     }
 
     // ---------- 刷新策略页签：该设备的各项间隔（2 列） ----------
-    for (int i = 0; i < 15; ++i)
+    for (int i = 0; i < kRefFieldsCount; ++i)
     {
         const int dev = kRefFields[i].dev;
         int idx = 0;

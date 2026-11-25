@@ -42,6 +42,7 @@ echo == [2/2] Build plugin DLL ==
     -ffunction-sections -fdata-sections ^
     -I"%ROOT%src\common" -I"%ROOT%src\plugin" -I"%ROOT%src\keyboard" ^
     -I"%ROOT%src\mouse" -I"%ROOT%src\dualsense" -I"%ROOT%src\g7" ^
+    -I"%ROOT%src\logitech" ^
     "%ROOT%src\keyboard\KeyboardDevice.cpp" ^
     "%ROOT%src\keyboard\KeyboardReader.cpp" ^
     "%ROOT%src\mouse\MouseDevice.cpp" ^
@@ -50,6 +51,8 @@ echo == [2/2] Build plugin DLL ==
     "%ROOT%src\dualsense\DualSenseReader.cpp" ^
     "%ROOT%src\g7\G7Device.cpp" ^
     "%ROOT%src\g7\G7Reader.cpp" ^
+    "%ROOT%src\logitech\LogitechDevice.cpp" ^
+    "%ROOT%src\logitech\LogitechReader.cpp" ^
     "%ROOT%src\plugin\PluginConfig.cpp" ^
     "%ROOT%src\plugin\PeripheralItem.cpp" ^
     "%ROOT%src\plugin\Plugin.cpp" ^

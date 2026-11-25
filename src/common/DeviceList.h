@@ -9,13 +9,13 @@
 // 不会再出现「只改常量、别处还是 4」的静默越界。
 // ============================================================
 
-constexpr int kDeviceCount = 4;
+constexpr int kDeviceCount = 5;
 
 // 默认显示顺序（设备索引）：按型号名首字母 A → Z
-constexpr int kDefaultOrder[] = { 1, 3, 2, 0 };
+constexpr int kDefaultOrder[] = { 1, 3, 2, 0, 4 };
 
 // 默认显示名（与设备索引一一对应，玩家可在“显示设置”里改）
-constexpr const wchar_t* kDefaultDeviceNames[] = { L"G87", L"A5 Ultra", L"G7 Pro", L"DS5" };
+constexpr const wchar_t* kDefaultDeviceNames[] = { L"G87", L"A5 Ultra", L"G7 Pro", L"DS5", L"M230" };
 
 static_assert(sizeof(kDefaultOrder) / sizeof(kDefaultOrder[0]) == kDeviceCount,
               "DeviceList.h: kDefaultOrder 的项数与 kDeviceCount 不一致");

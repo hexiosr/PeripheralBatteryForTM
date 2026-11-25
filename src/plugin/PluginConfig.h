@@ -37,6 +37,8 @@ struct RefreshConfig
     // DualSense
     int ds_pnp_ms = 2000;    // 在位检查间隔
     int ds_read_ms = 60000;  // 电量读取间隔
+    // 罗技（HID++ 读电压；设备休眠时接收器不回包，超时即跳过这一轮）
+    int lg_poll_ms = 2000;      // 查询间隔
 };
 
 // 全局布局：设备之间 / 条目边缘的参数，一套管所有设备
@@ -52,9 +54,13 @@ struct DeviceStyle
 {
     int level_high = 60;       // ≥ 该值为高电量色
     int level_low = 20;        // ≥ 该值为中电量色，低于为低电量色
+    // 只报电压的设备显示电压时，分界按补偿后的毫伏给（% 在那套刻度上没有意义）
+    int volt_high_mv = 1450;
+    int volt_low_mv = 1250;
     int ring_scale_x10 = 15;   // 数字/圆环缩放 = 字高 × ring_scale_x10 / 10（设置里叫「数字缩放」）
     int num_gap = 2;           // 紧凑布局时圆环与右侧数字的间隙
     bool show_pct_sign = true; // 紧凑布局时环外数字是否带 %
+    bool volt_percent = false; // 只报电压的设备：显示换算后的百分比（否则直接显示电压）
 
     COLORREF green_dark = RGB(112, 205, 126);
     COLORREF green_light = RGB(56, 158, 68);
